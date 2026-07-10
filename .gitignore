@@ -1,0 +1,28 @@
+# Virtual environment
+.venv/
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+
+# Testing cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment variables and secrets
+.env
+.env.*
+
+# Keep the example environment file
+!.env.example
+
+# VS Code and operating-system files
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local uploaded and processed data
+data/processed/
+uploads/
+storage/
