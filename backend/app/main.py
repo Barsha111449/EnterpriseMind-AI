@@ -4,6 +4,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from backend.app.database.session import engine
 from backend.app.api.registration import router as registration_router
+from backend.app.api.authentication import router as authentication_router
 
 app = FastAPI(
     title="EnterpriseMind AI",
@@ -11,6 +12,7 @@ app = FastAPI(
     description="A secure company knowledge assistant",
 )
 app.include_router(registration_router)
+app.include_router(authentication_router)
 
 
 @app.get("/")
