@@ -25,3 +25,13 @@ class LoginResponse(BaseModel):
     user_id: uuid.UUID
     organization_id: uuid.UUID
     role: str
+
+
+class CurrentUserResponse(BaseModel):
+    user_id: uuid.UUID
+    email: EmailStr
+    full_name: str
+    organization_id: uuid.UUID
+    organization_name: str
+    organization_slug: str
+    role: str

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.api.dependencies import get_current_user
 from backend.app.core.config import settings
 from backend.app.core.security import (
     create_access_token,
@@ -16,6 +17,7 @@ from backend.app.models import (
     User,
 )
 from backend.app.schemas.authentication import (
+    CurrentUserResponse,
     LoginRequest,
     LoginResponse,
 )
@@ -39,7 +41,9 @@ def login(
     normalized_slug = payload.organization_slug.lower()
 
     user = database_session.scalar(
-        select(User).where(User.email == normalized_email)
+        select(User).where(
+            User.email == normalized_email
+        )
     )
 
     organization = database_session.scalar(
@@ -100,3 +104,18 @@ def login(
         organization_id=organization.id,
         role=membership.role,
     )
+
+
+@router.get(
+    "/me",
+    response_model=CurrentUserResponse,
+)
+def get_current_user_profile(
+    current_user: Annotated[
+        CurrentUserResponse,
+        Depends(get_current_user),
+    ],
+) -> CurrentUserResponse:
+    """Return the authenticated user's information."""
+
+    return current_user

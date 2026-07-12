@@ -76,3 +76,64 @@ def test_login_rejects_incorrect_password(
     assert response.json() == {
         "detail": "Invalid login credentials."
     }
+def test_current_user_endpoint_returns_authenticated_user(
+    client: TestClient,
+) -> None:
+    create_test_account(client)
+
+    login_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "organization_slug": "login-test-company",
+            "email": "admin@login-test.example",
+            "password": "LoginTest!2026",
+        },
+    )
+
+    assert login_response.status_code == 200
+
+    access_token = login_response.json()["access_token"]
+
+    response = client.get(
+        "/api/v1/auth/me",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+        },
+    )
+
+    assert response.status_code == 200
+
+    response_data = response.json()
+
+    assert response_data["email"] == "admin@login-test.example"
+    assert response_data["full_name"] == "Login Test Administrator"
+    assert response_data["organization_name"] == "Login Test Company"
+    assert response_data["organization_slug"] == "login-test-company"
+    assert response_data["role"] == "admin"
+
+
+def test_current_user_endpoint_requires_token(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/v1/auth/me")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Invalid or expired access token."
+    }
+
+
+def test_current_user_endpoint_rejects_invalid_token(
+    client: TestClient,
+) -> None:
+    response = client.get(
+        "/api/v1/auth/me",
+        headers={
+            "Authorization": "Bearer invalid-token",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Invalid or expired access token."
+    }
