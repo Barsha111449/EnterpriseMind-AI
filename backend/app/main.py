@@ -3,13 +3,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.app.database.session import engine
-
+from backend.app.api.registration import router as registration_router
 
 app = FastAPI(
     title="EnterpriseMind AI",
     version="0.1.0",
     description="A secure company knowledge assistant",
 )
+app.include_router(registration_router)
 
 
 @app.get("/")
