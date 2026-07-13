@@ -13,14 +13,21 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from backend.app.api.dependencies import get_current_user
 from backend.app.database.session import get_db
 from backend.app.models.document import Document
+from backend.app.models.document_chunk import DocumentChunk
 from backend.app.schemas.authentication import CurrentUserResponse
-from backend.app.schemas.document import DocumentResponse
+from backend.app.schemas.document import (
+    DocumentProcessingResponse,
+    DocumentResponse,
+)
+from backend.app.services.document_processing import (
+    extract_document_chunks,
+)
 
 
 router = APIRouter(
@@ -290,3 +297,128 @@ def download_document(
         media_type=document.content_type,
         filename=document.original_filename,
     )
+@router.post(
+    "/{document_id}/process",
+    response_model=DocumentProcessingResponse,
+)
+def process_document(
+    document_id: uuid.UUID,
+    current_user: Annotated[
+        CurrentUserResponse,
+        Depends(get_current_user),
+    ],
+    database_session: Annotated[
+        Session,
+        Depends(get_db),
+    ],
+) -> DocumentProcessingResponse:
+    """Extract and store chunks from one organisation document."""
+
+    statement = select(Document).where(
+        Document.id == document_id,
+        Document.organization_id
+        == current_user.organization_id,
+    )
+
+    document = database_session.scalar(statement)
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    organization_directory = (
+        UPLOAD_ROOT / str(current_user.organization_id)
+    ).resolve()
+
+    file_path = Path(document.storage_path).resolve()
+
+    try:
+        file_path.relative_to(organization_directory)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document file not found.",
+        ) from exc
+
+    if not file_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document file not found.",
+        )
+
+    document.status = "processing"
+    document.error_message = None
+    database_session.commit()
+
+    try:
+        extracted_chunks = extract_document_chunks(
+            file_path
+        )
+
+        if not extracted_chunks:
+            raise ValueError(
+                "No extractable text was found in the document."
+            )
+
+        database_session.execute(
+            delete(DocumentChunk).where(
+                DocumentChunk.document_id == document.id,
+                DocumentChunk.organization_id
+                == current_user.organization_id,
+            )
+        )
+
+        for chunk_index, extracted_chunk in enumerate(
+            extracted_chunks
+        ):
+            database_session.add(
+                DocumentChunk(
+                    organization_id=(
+                        current_user.organization_id
+                    ),
+                    document_id=document.id,
+                    chunk_index=chunk_index,
+                    page_number=(
+                        extracted_chunk.page_number
+                    ),
+                    content=extracted_chunk.content,
+                    character_count=len(
+                        extracted_chunk.content
+                    ),
+                )
+            )
+
+        document.status = "ready"
+        document.error_message = None
+
+        database_session.commit()
+
+        return DocumentProcessingResponse(
+            document_id=document.id,
+            status=document.status,
+            chunk_count=len(extracted_chunks),
+        )
+
+    except Exception as exc:
+        database_session.rollback()
+
+        failed_document = database_session.scalar(
+            statement
+        )
+
+        if failed_document is not None:
+            failed_document.status = "failed"
+            failed_document.error_message = str(exc)[
+                :2000
+            ]
+
+            database_session.commit()
+
+        raise HTTPException(
+            status_code=(
+                status.HTTP_422_UNPROCESSABLE_ENTITY
+            ),
+            detail="Document processing failed.",
+        ) from exc

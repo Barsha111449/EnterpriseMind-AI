@@ -16,3 +16,8 @@ class DocumentResponse(BaseModel):
     status: str
     error_message: str | None
     created_at: datetime
+
+class DocumentProcessingResponse(BaseModel):
+    document_id: uuid.UUID
+    status: str
+    chunk_count: int
