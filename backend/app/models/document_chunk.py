@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-
+from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
@@ -84,6 +84,10 @@ class DocumentChunk(Base):
         Integer,
         nullable=False,
     )
+    embedding: Mapped[list[float] | None] = mapped_column(
+    VECTOR(384),
+    nullable=True,
+)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
