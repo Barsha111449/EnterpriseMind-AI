@@ -12,6 +12,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -233,3 +234,59 @@ def get_document(
         )
 
     return DocumentResponse.model_validate(document)
+@router.get(
+    "/{document_id}/download",
+    response_class=FileResponse,
+)
+def download_document(
+    document_id: uuid.UUID,
+    current_user: Annotated[
+        CurrentUserResponse,
+        Depends(get_current_user),
+    ],
+    database_session: Annotated[
+        Session,
+        Depends(get_db),
+    ],
+) -> FileResponse:
+    """Download one document belonging to the current organisation."""
+
+    statement = select(Document).where(
+        Document.id == document_id,
+        Document.organization_id
+        == current_user.organization_id,
+    )
+
+    document = database_session.scalar(statement)
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    organization_directory = (
+        UPLOAD_ROOT / str(current_user.organization_id)
+    ).resolve()
+
+    file_path = Path(document.storage_path).resolve()
+
+    try:
+        file_path.relative_to(organization_directory)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document file not found.",
+        ) from exc
+
+    if not file_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document file not found.",
+        )
+
+    return FileResponse(
+        path=file_path,
+        media_type=document.content_type,
+        filename=document.original_filename,
+    )
