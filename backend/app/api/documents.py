@@ -22,6 +22,7 @@ from backend.app.models.document import Document
 from backend.app.models.document_chunk import DocumentChunk
 from backend.app.schemas.authentication import CurrentUserResponse
 from backend.app.schemas.document import (
+    DocumentChunkResponse,
     DocumentProcessingResponse,
     DocumentResponse,
 )
@@ -422,3 +423,53 @@ def process_document(
             ),
             detail="Document processing failed.",
         ) from exc
+        
+@router.get(
+    "/{document_id}/chunks",
+    response_model=list[DocumentChunkResponse],
+)
+def list_document_chunks(
+    document_id: uuid.UUID,
+    current_user: Annotated[
+        CurrentUserResponse,
+        Depends(get_current_user),
+    ],
+    database_session: Annotated[
+        Session,
+        Depends(get_db),
+    ],
+) -> list[DocumentChunkResponse]:
+    """List stored chunks for one organisation document."""
+
+    document_statement = select(Document).where(
+        Document.id == document_id,
+        Document.organization_id
+        == current_user.organization_id,
+    )
+
+    document = database_session.scalar(document_statement)
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    chunks_statement = (
+        select(DocumentChunk)
+        .where(
+            DocumentChunk.document_id == document_id,
+            DocumentChunk.organization_id
+            == current_user.organization_id,
+        )
+        .order_by(DocumentChunk.chunk_index)
+    )
+
+    chunks = database_session.scalars(
+        chunks_statement
+    ).all()
+
+    return [
+        DocumentChunkResponse.model_validate(chunk)
+        for chunk in chunks
+    ]
