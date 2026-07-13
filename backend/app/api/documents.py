@@ -12,6 +12,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.api.dependencies import get_current_user
@@ -163,5 +164,72 @@ async def upload_document(
         database_session.rollback()
         destination.unlink(missing_ok=True)
         raise
+
+    return DocumentResponse.model_validate(document)
+
+
+@router.get(
+    "",
+    response_model=list[DocumentResponse],
+)
+def list_documents(
+    current_user: Annotated[
+        CurrentUserResponse,
+        Depends(get_current_user),
+    ],
+    database_session: Annotated[
+        Session,
+        Depends(get_db),
+    ],
+) -> list[DocumentResponse]:
+    """List documents belonging to the current organisation."""
+
+    statement = (
+        select(Document)
+        .where(
+            Document.organization_id
+            == current_user.organization_id
+        )
+        .order_by(Document.created_at.desc())
+    )
+
+    documents = database_session.scalars(statement).all()
+
+    return [
+        DocumentResponse.model_validate(document)
+        for document in documents
+    ]
+
+
+@router.get(
+    "/{document_id}",
+    response_model=DocumentResponse,
+)
+def get_document(
+    document_id: uuid.UUID,
+    current_user: Annotated[
+        CurrentUserResponse,
+        Depends(get_current_user),
+    ],
+    database_session: Annotated[
+        Session,
+        Depends(get_db),
+    ],
+) -> DocumentResponse:
+    """Return one document belonging to the current organisation."""
+
+    statement = select(Document).where(
+        Document.id == document_id,
+        Document.organization_id
+        == current_user.organization_id,
+    )
+
+    document = database_session.scalar(statement)
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
 
     return DocumentResponse.model_validate(document)
