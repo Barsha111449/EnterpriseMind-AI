@@ -6,7 +6,7 @@ from backend.app.database.session import engine
 from backend.app.api.registration import router as registration_router
 from backend.app.api.authentication import router as authentication_router
 from backend.app.api.documents import router as documents_router
-
+from backend.app.api.search import router as search_router
 app = FastAPI(
     title="EnterpriseMind AI",
     version="0.1.0",
@@ -15,7 +15,7 @@ app = FastAPI(
 app.include_router(registration_router)
 app.include_router(authentication_router)
 app.include_router(documents_router)
-
+app.include_router(search_router)
 
 @app.get("/")
 def root() -> dict[str, str]:
