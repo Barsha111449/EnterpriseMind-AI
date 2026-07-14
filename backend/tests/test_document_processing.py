@@ -86,6 +86,13 @@ def test_process_document_creates_chunks(
         "backend.app.api.documents.UPLOAD_ROOT",
         test_upload_directory,
     )
+    monkeypatch.setattr(
+    "backend.app.api.documents.generate_embeddings",
+    lambda texts: [
+        [0.01] * 384
+        for _ in texts
+    ],
+)
 
     access_token = create_account_and_get_token(client)
 
@@ -167,6 +174,13 @@ def test_chunks_endpoint_protects_organization_data(
         "backend.app.api.documents.UPLOAD_ROOT",
         test_upload_directory,
     )
+    monkeypatch.setattr(
+    "backend.app.api.documents.generate_embeddings",
+    lambda texts: [
+        [0.01] * 384
+        for _ in texts
+    ],
+)
 
     first_token = create_account_and_get_token(client)
     second_token = create_account_and_get_token(client)
