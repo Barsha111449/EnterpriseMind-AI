@@ -29,6 +29,9 @@ from backend.app.schemas.document import (
 from backend.app.services.document_processing import (
     extract_document_chunks,
 )
+from backend.app.services.embedding_service import (
+    generate_embeddings,
+)
 
 
 router = APIRouter(
@@ -53,7 +56,7 @@ def validate_file_content(
     extension: str,
     content: bytes,
 ) -> None:
-    """Check that the uploaded content matches its file extension."""
+    """Check that uploaded content matches its file extension."""
 
     if extension == ".pdf":
         if not content.startswith(b"%PDF-"):
@@ -147,8 +150,8 @@ async def upload_document(
         exist_ok=True,
     )
 
-    destination = organization_directory / (
-        f"{document_id}{extension}"
+    destination = (
+        organization_directory / f"{document_id}{extension}"
     )
 
     document = Document(
@@ -242,6 +245,8 @@ def get_document(
         )
 
     return DocumentResponse.model_validate(document)
+
+
 @router.get(
     "/{document_id}/download",
     response_class=FileResponse,
@@ -298,6 +303,8 @@ def download_document(
         media_type=document.content_type,
         filename=document.original_filename,
     )
+
+
 @router.post(
     "/{document_id}/process",
     response_model=DocumentProcessingResponse,
@@ -313,7 +320,7 @@ def process_document(
         Depends(get_db),
     ],
 ) -> DocumentProcessingResponse:
-    """Extract and store chunks from one organisation document."""
+    """Extract text, create chunks, generate embeddings, and store them."""
 
     statement = select(Document).where(
         Document.id == document_id,
@@ -363,6 +370,19 @@ def process_document(
                 "No extractable text was found in the document."
             )
 
+        chunk_texts = [
+            extracted_chunk.content
+            for extracted_chunk in extracted_chunks
+        ]
+
+        embeddings = generate_embeddings(chunk_texts)
+
+        if len(embeddings) != len(extracted_chunks):
+            raise ValueError(
+                "The number of embeddings does not match "
+                "the number of document chunks."
+            )
+
         database_session.execute(
             delete(DocumentChunk).where(
                 DocumentChunk.document_id == document.id,
@@ -388,6 +408,7 @@ def process_document(
                     character_count=len(
                         extracted_chunk.content
                     ),
+                    embedding=embeddings[chunk_index],
                 )
             )
 
@@ -411,19 +432,16 @@ def process_document(
 
         if failed_document is not None:
             failed_document.status = "failed"
-            failed_document.error_message = str(exc)[
-                :2000
-            ]
+            failed_document.error_message = str(exc)[:2000]
 
             database_session.commit()
 
         raise HTTPException(
-            status_code=(
-                status.HTTP_422_UNPROCESSABLE_ENTITY
-            ),
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Document processing failed.",
         ) from exc
-        
+
+
 @router.get(
     "/{document_id}/chunks",
     response_model=list[DocumentChunkResponse],
