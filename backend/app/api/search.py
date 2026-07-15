@@ -6,7 +6,7 @@ from fastapi import (
     HTTPException,
     status,
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.app.api.dependencies import get_current_user
@@ -15,6 +15,9 @@ from backend.app.models.document import Document
 from backend.app.models.document_chunk import DocumentChunk
 from backend.app.schemas.authentication import CurrentUserResponse
 from backend.app.schemas.search import (
+    KeywordSearchRequest,
+    KeywordSearchResponse,
+    KeywordSearchResult,
     SemanticSearchRequest,
     SemanticSearchResponse,
     SemanticSearchResult,
@@ -45,7 +48,7 @@ def semantic_search(
         Depends(get_db),
     ],
 ) -> SemanticSearchResponse:
-    """Search relevant document chunks using vector similarity."""
+    """Search document chunks using vector similarity."""
 
     query_text = search_request.query.strip()
 
@@ -61,7 +64,9 @@ def semantic_search(
 
     if not query_embeddings:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=(
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
             detail="Could not generate the query embedding.",
         )
 
@@ -95,9 +100,7 @@ def semantic_search(
         .limit(search_request.top_k)
     )
 
-    rows = database_session.execute(
-        statement
-    ).all()
+    rows = database_session.execute(statement).all()
 
     results: list[SemanticSearchResult] = []
 
@@ -125,6 +128,97 @@ def semantic_search(
         )
 
     return SemanticSearchResponse(
+        query=query_text,
+        result_count=len(results),
+        results=results,
+    )
+
+
+@router.post(
+    "/keyword",
+    response_model=KeywordSearchResponse,
+)
+def keyword_search(
+    search_request: KeywordSearchRequest,
+    current_user: Annotated[
+        CurrentUserResponse,
+        Depends(get_current_user),
+    ],
+    database_session: Annotated[
+        Session,
+        Depends(get_db),
+    ],
+) -> KeywordSearchResponse:
+    """Search document chunks using PostgreSQL full-text search."""
+
+    query_text = search_request.query.strip()
+
+    if not query_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The search query cannot be empty.",
+        )
+
+    search_vector = func.to_tsvector(
+        "english",
+        DocumentChunk.content,
+    )
+
+    search_query = func.plainto_tsquery(
+        "english",
+        query_text,
+    )
+
+    keyword_score = func.ts_rank_cd(
+        search_vector,
+        search_query,
+    ).label("keyword_score")
+
+    statement = (
+        select(
+            DocumentChunk,
+            Document.original_filename,
+            keyword_score,
+        )
+        .join(
+            Document,
+            Document.id == DocumentChunk.document_id,
+        )
+        .where(
+            DocumentChunk.organization_id
+            == current_user.organization_id,
+            Document.organization_id
+            == current_user.organization_id,
+            Document.status == "ready",
+            search_vector.bool_op("@@")(
+                search_query
+            ),
+        )
+        .order_by(keyword_score.desc())
+        .limit(search_request.top_k)
+    )
+
+    rows = database_session.execute(statement).all()
+
+    results: list[KeywordSearchResult] = []
+
+    for chunk, original_filename, score in rows:
+        results.append(
+            KeywordSearchResult(
+                chunk_id=chunk.id,
+                document_id=chunk.document_id,
+                original_filename=original_filename,
+                page_number=chunk.page_number,
+                chunk_index=chunk.chunk_index,
+                content=chunk.content,
+                keyword_score=round(
+                    float(score or 0.0),
+                    6,
+                ),
+            )
+        )
+
+    return KeywordSearchResponse(
         query=query_text,
         result_count=len(results),
         results=results,
