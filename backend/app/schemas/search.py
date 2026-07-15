@@ -89,7 +89,7 @@ class HybridSearchRequest(BaseModel):
 
 
 class HybridSearchResult(BaseModel):
-    """One chunk returned by hybrid search."""
+    """One chunk returned by hybrid search and reranking."""
 
     chunk_id: uuid.UUID
     document_id: uuid.UUID
@@ -101,7 +101,7 @@ class HybridSearchResult(BaseModel):
     semantic_score: float | None
     keyword_score: float | None
     hybrid_score: float
-
+    rerank_score: float
 
 class HybridSearchResponse(BaseModel):
     """Complete hybrid-search response."""

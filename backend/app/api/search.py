@@ -1,3 +1,4 @@
+import uuid
 from typing import Annotated
 
 from fastapi import (
@@ -28,6 +29,9 @@ from backend.app.schemas.search import (
 from backend.app.services.embedding_service import (
     generate_embeddings,
 )
+from backend.app.services.reranking_service import (
+    rerank_candidates,
+)
 
 
 router = APIRouter(
@@ -53,10 +57,10 @@ def clean_query(query: str) -> str:
 def get_semantic_rows(
     query_text: str,
     result_limit: int,
-    organization_id,
+    organization_id: uuid.UUID,
     database_session: Session,
 ):
-    """Retrieve chunks ordered by vector similarity."""
+    """Retrieve document chunks using vector similarity."""
 
     query_embeddings = generate_embeddings(
         [query_text]
@@ -64,9 +68,7 @@ def get_semantic_rows(
 
     if not query_embeddings:
         raise HTTPException(
-            status_code=(
-                status.HTTP_500_INTERNAL_SERVER_ERROR
-            ),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not generate the query embedding.",
         )
 
@@ -108,10 +110,10 @@ def get_semantic_rows(
 def get_keyword_rows(
     query_text: str,
     result_limit: int,
-    organization_id,
+    organization_id: uuid.UUID,
     database_session: Session,
 ):
-    """Retrieve chunks using PostgreSQL full-text search."""
+    """Retrieve document chunks using PostgreSQL keyword search."""
 
     search_vector = func.to_tsvector(
         "english",
@@ -172,7 +174,7 @@ def semantic_search(
         Depends(get_db),
     ],
 ) -> SemanticSearchResponse:
-    """Search document chunks using vector similarity."""
+    """Search document chunks using semantic similarity."""
 
     query_text = clean_query(
         search_request.query
@@ -188,7 +190,9 @@ def semantic_search(
     results: list[SemanticSearchResult] = []
 
     for chunk, original_filename, distance in rows:
-        similarity_score = 1.0 - float(distance)
+        similarity_score = (
+            1.0 - float(distance)
+        )
 
         similarity_score = max(
             -1.0,
@@ -285,7 +289,7 @@ def hybrid_search(
         Depends(get_db),
     ],
 ) -> HybridSearchResponse:
-    """Combine semantic and keyword search results."""
+    """Combine semantic search, keyword search, and reranking."""
 
     query_text = clean_query(
         search_request.query
@@ -310,7 +314,10 @@ def hybrid_search(
         database_session=database_session,
     )
 
-    combined_results: dict[str, dict] = {}
+    combined_results: dict[
+        str,
+        dict,
+    ] = {}
 
     reciprocal_rank_constant = 60.0
 
@@ -320,7 +327,9 @@ def hybrid_search(
     ):
         chunk, original_filename, distance = row
 
-        similarity_score = 1.0 - float(distance)
+        similarity_score = (
+            1.0 - float(distance)
+        )
 
         similarity_score = max(
             -1.0,
@@ -395,13 +404,17 @@ def hybrid_search(
 
     ranked_results = sorted(
         combined_results.values(),
-        key=lambda result: result["hybrid_score"],
+        key=lambda result: result[
+            "hybrid_score"
+        ],
         reverse=True,
     )
 
-    selected_results = ranked_results[
-        :search_request.top_k
-    ]
+    reranked_results = rerank_candidates(
+        query=query_text,
+        candidates=ranked_results,
+        top_k=search_request.top_k,
+    )
 
     results = [
         HybridSearchResult(
@@ -416,13 +429,19 @@ def hybrid_search(
             semantic_score=(
                 result["semantic_score"]
             ),
-            keyword_score=result["keyword_score"],
+            keyword_score=(
+                result["keyword_score"]
+            ),
             hybrid_score=round(
-                result["hybrid_score"],
+                float(result["hybrid_score"]),
                 8,
             ),
+            rerank_score=round(
+                float(result["rerank_score"]),
+                6,
+            ),
         )
-        for result in selected_results
+        for result in reranked_results
     ]
 
     return HybridSearchResponse(

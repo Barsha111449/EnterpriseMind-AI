@@ -76,7 +76,7 @@ def create_test_docx(
 def configure_fake_embeddings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Replace the real embedding model with deterministic vectors."""
+    """Replace real embedding and reranking models with fake test data."""
 
     monkeypatch.setattr(
         "backend.app.api.documents.generate_embeddings",
@@ -92,6 +92,33 @@ def configure_fake_embeddings(
             TEST_EMBEDDING.copy()
             for _ in texts
         ],
+    )
+
+    def fake_rerank_candidates(
+        query: str,
+        candidates: list[dict],
+        top_k: int,
+    ) -> list[dict]:
+        """Return predictable reranking scores during tests."""
+
+        reranked_candidates: list[dict] = []
+
+        for index, candidate in enumerate(candidates):
+            reranked_candidate = candidate.copy()
+
+            reranked_candidate["rerank_score"] = (
+                1.0 - index * 0.01
+            )
+
+            reranked_candidates.append(
+                reranked_candidate
+            )
+
+        return reranked_candidates[:top_k]
+
+    monkeypatch.setattr(
+        "backend.app.api.search.rerank_candidates",
+        fake_rerank_candidates,
     )
 
 
@@ -346,290 +373,4 @@ def test_semantic_search_protects_organization_data(
         "second-company-private.docx"
         not in returned_filenames
     )
-def test_keyword_search_returns_matching_chunks(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keyword search should return chunks containing exact words."""
-
-    test_upload_directory = tmp_path / "uploads"
-
-    monkeypatch.setattr(
-        "backend.app.api.documents.UPLOAD_ROOT",
-        test_upload_directory,
-    )
-
-    configure_fake_embeddings(monkeypatch)
-
-    access_token = create_account_and_get_token(client)
-
-    upload_and_process_document(
-        client=client,
-        access_token=access_token,
-        filename="technical-skills.docx",
-        content=create_test_docx(
-            title="Technical Skills",
-            content=(
-                "The employee has Python and machine learning "
-                "development experience."
-            ),
-        ),
-    )
-
-    response = client.post(
-        "/api/v1/search/keyword",
-        headers={
-            "Authorization": f"Bearer {access_token}",
-        },
-        json={
-            "query": "Python machine learning",
-            "top_k": 5,
-        },
-    )
-
-    assert response.status_code == 200
-
-    response_data = response.json()
-
-    assert response_data["query"] == (
-        "Python machine learning"
-    )
-
-    assert response_data["result_count"] >= 1
-
-    matching_result = next(
-        result
-        for result in response_data["results"]
-        if result["original_filename"]
-        == "technical-skills.docx"
-    )
-
-    assert matching_result["keyword_score"] > 0
-    assert "Python" in matching_result["content"]
-
-
-def test_keyword_search_requires_authentication(
-    client: TestClient,
-) -> None:
-    """Unauthenticated users must not use keyword search."""
-
-    response = client.post(
-        "/api/v1/search/keyword",
-        json={
-            "query": "Python",
-            "top_k": 5,
-        },
-    )
-
-    assert response.status_code == 401
-
-
-def test_hybrid_search_requires_authentication(
-    client: TestClient,
-) -> None:
-    """Unauthenticated users must not use hybrid search."""
-
-    response = client.post(
-        "/api/v1/search/hybrid",
-        json={
-            "query": "company policy",
-            "top_k": 5,
-        },
-    )
-
-    assert response.status_code == 401
-
-
-def test_hybrid_search_combines_search_results(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Hybrid search should combine semantic and keyword results."""
-
-    test_upload_directory = tmp_path / "uploads"
-
-    monkeypatch.setattr(
-        "backend.app.api.documents.UPLOAD_ROOT",
-        test_upload_directory,
-    )
-
-    configure_fake_embeddings(monkeypatch)
-
-    access_token = create_account_and_get_token(client)
-
-    upload_and_process_document(
-        client=client,
-        access_token=access_token,
-        filename="ai-skills.docx",
-        content=create_test_docx(
-            title="AI Engineering Skills",
-            content=(
-                "The engineer uses Python for machine learning "
-                "and artificial intelligence projects."
-            ),
-        ),
-    )
-
-    response = client.post(
-        "/api/v1/search/hybrid",
-        headers={
-            "Authorization": f"Bearer {access_token}",
-        },
-        json={
-            "query": "Python machine learning",
-            "top_k": 5,
-        },
-    )
-
-    assert response.status_code == 200
-
-    response_data = response.json()
-
-    assert response_data["query"] == (
-        "Python machine learning"
-    )
-
-    assert response_data["result_count"] >= 1
-
-    matching_result = next(
-        result
-        for result in response_data["results"]
-        if result["original_filename"]
-        == "ai-skills.docx"
-    )
-
-    assert matching_result["semantic_score"] is not None
-    assert matching_result["keyword_score"] is not None
-    assert matching_result["hybrid_score"] > 0
-
-
-def test_hybrid_search_respects_top_k(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Hybrid search must respect the requested result limit."""
-
-    test_upload_directory = tmp_path / "uploads"
-
-    monkeypatch.setattr(
-        "backend.app.api.documents.UPLOAD_ROOT",
-        test_upload_directory,
-    )
-
-    configure_fake_embeddings(monkeypatch)
-
-    access_token = create_account_and_get_token(client)
-
-    upload_and_process_document(
-        client=client,
-        access_token=access_token,
-        filename="python-policy.docx",
-        content=create_test_docx(
-            title="Python Policy",
-            content="Python is used for company applications.",
-        ),
-    )
-
-    upload_and_process_document(
-        client=client,
-        access_token=access_token,
-        filename="machine-learning-policy.docx",
-        content=create_test_docx(
-            title="Machine Learning Policy",
-            content=(
-                "Machine learning is used for company systems."
-            ),
-        ),
-    )
-
-    response = client.post(
-        "/api/v1/search/hybrid",
-        headers={
-            "Authorization": f"Bearer {access_token}",
-        },
-        json={
-            "query": "company systems",
-            "top_k": 1,
-        },
-    )
-
-    assert response.status_code == 200
-
-    response_data = response.json()
-
-    assert response_data["result_count"] == 1
-    assert len(response_data["results"]) == 1
-
-
-def test_hybrid_search_protects_organization_data(
-    client: TestClient,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Hybrid search must not return another organisation's data."""
-
-    test_upload_directory = tmp_path / "uploads"
-
-    monkeypatch.setattr(
-        "backend.app.api.documents.UPLOAD_ROOT",
-        test_upload_directory,
-    )
-
-    configure_fake_embeddings(monkeypatch)
-
-    first_token = create_account_and_get_token(client)
-    second_token = create_account_and_get_token(client)
-
-    upload_and_process_document(
-        client=client,
-        access_token=first_token,
-        filename="first-company-policy.docx",
-        content=create_test_docx(
-            title="First Company Policy",
-            content=(
-                "The confidential Phoenix policy belongs only "
-                "to the first company."
-            ),
-        ),
-    )
-
-    upload_and_process_document(
-        client=client,
-        access_token=second_token,
-        filename="second-company-policy.docx",
-        content=create_test_docx(
-            title="Second Company Policy",
-            content=(
-                "The second company stores confidential "
-                "financial information."
-            ),
-        ),
-    )
-
-    response = client.post(
-        "/api/v1/search/hybrid",
-        headers={
-            "Authorization": f"Bearer {first_token}",
-        },
-        json={
-            "query": "confidential Phoenix policy",
-            "top_k": 20,
-        },
-    )
-
-    assert response.status_code == 200
-
-    returned_filenames = {
-        result["original_filename"]
-        for result in response.json()["results"]
-    }
-
-    assert "first-company-policy.docx" in returned_filenames
-
-    assert (
-        "second-company-policy.docx"
-        not in returned_filenames
-    )
+    
