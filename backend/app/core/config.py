@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> URL:
         return URL.create(
-            drivername="postgresql+psycopg",
+            drivername="postgresql+pg8000",
             username=self.postgres_user,
             password=self.postgres_password,
             host=self.postgres_host,

@@ -13,7 +13,7 @@ from backend.app.main import app
 
 
 test_database_url = URL.create(
-    drivername="postgresql+psycopg",
+    drivername="postgresql+pg8000",
     username=settings.postgres_user,
     password=settings.postgres_password,
     host=settings.postgres_host,
