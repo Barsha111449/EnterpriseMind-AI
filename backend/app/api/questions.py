@@ -21,6 +21,9 @@ from backend.app.services.answer_generation_service import (
     NO_EVIDENCE_ANSWER,
     generate_grounded_answer,
 )
+from backend.app.services.evidence_validation_service import (
+    filter_relevant_candidates,
+)
 from backend.app.services.rag_service import (
     prepare_evidence,
 )
@@ -47,7 +50,7 @@ def ask_question(
         Depends(get_db),
     ],
 ) -> AskQuestionResponse:
-    """Answer a question using the current organisation's documents."""
+    """Answer using validated evidence from organisation documents."""
 
     question_text = request.question.strip()
 
@@ -66,13 +69,18 @@ def ask_question(
         database_session=database_session,
     )
 
-    candidates = [
+    retrieved_candidates = [
         result.model_dump()
         for result in hybrid_response.results
     ]
 
+    relevant_candidates = filter_relevant_candidates(
+        candidates=retrieved_candidates,
+        top_k=request.top_k,
+    )
+
     evidence = prepare_evidence(
-        candidates=candidates,
+        candidates=relevant_candidates,
         top_k=request.top_k,
     )
 
