@@ -10,6 +10,9 @@ from backend.app.api.search import router as search_router
 from backend.app.api.questions import (
     router as questions_router,
 )
+from backend.app.api.conversations import (
+    router as conversations_router,
+)
 
 app = FastAPI(
     title="EnterpriseMind AI",
@@ -21,7 +24,7 @@ app.include_router(authentication_router)
 app.include_router(documents_router)
 app.include_router(search_router)
 app.include_router(questions_router)
-
+app.include_router(conversations_router)
 @app.get("/")
 def root() -> dict[str, str]:
     return {

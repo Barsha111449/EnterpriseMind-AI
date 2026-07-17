@@ -6,6 +6,11 @@ from pydantic import BaseModel, Field
 class AskQuestionRequest(BaseModel):
     """Question sent by the authenticated user."""
 
+    conversation_id: uuid.UUID | None = Field(
+        default=None,
+        description="Conversation where the question and answer will be saved.",
+    )
+
     question: str = Field(
         min_length=2,
         max_length=2000,
