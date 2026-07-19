@@ -16,7 +16,9 @@ from backend.app.api.conversations import (
 from backend.app.api.feedback import (
     router as feedback_router,
 )
-
+from backend.app.api.admin_analytics import (
+    router as admin_analytics_router,
+)
 app = FastAPI(
     title="EnterpriseMind AI",
     version="0.1.0",
@@ -29,7 +31,7 @@ app.include_router(search_router)
 app.include_router(questions_router)
 app.include_router(conversations_router)
 app.include_router(feedback_router)
-
+app.include_router(admin_analytics_router)
 
 @app.get("/")
 def root() -> dict[str, str]:
