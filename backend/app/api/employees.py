@@ -12,6 +12,10 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.api.dependencies import get_current_user
+from backend.app.core.permissions import (
+    ADMIN_ROLES,
+    require_roles,
+)
 from backend.app.core.security import hash_password
 from backend.app.database.session import get_db
 from backend.app.models import (
@@ -31,18 +35,6 @@ router = APIRouter(
     prefix="/api/v1/admin/employees",
     tags=["employee management"],
 )
-
-
-def require_admin(
-    current_user: CurrentUserResponse,
-) -> None:
-    """Allow only organization administrators."""
-
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Administrator access required.",
-        )
 
 
 def build_employee_response(
@@ -118,7 +110,11 @@ def list_employees(
 ) -> list[EmployeeResponse]:
     """List employees belonging to the current organization."""
 
-    require_admin(current_user)
+    require_roles(
+        current_user,
+        ADMIN_ROLES,
+        detail="Administrator access required.",
+    )
 
     statement = (
         select(
@@ -167,7 +163,11 @@ def create_employee(
 ) -> EmployeeResponse:
     """Create an employee in the administrator's organization."""
 
-    require_admin(current_user)
+    require_roles(
+        current_user,
+        ADMIN_ROLES,
+        detail="Administrator access required.",
+    )
 
     normalized_email = str(request.email).lower()
     full_name = request.full_name.strip()
@@ -246,7 +246,11 @@ def update_employee_role(
 ) -> EmployeeResponse:
     """Change an employee's organization role."""
 
-    require_admin(current_user)
+    require_roles(
+        current_user,
+        ADMIN_ROLES,
+        detail="Administrator access required.",
+    )
 
     user, membership = get_organization_employee(
         user_id=user_id,
@@ -292,7 +296,11 @@ def update_employee_status(
 ) -> EmployeeResponse:
     """Activate or deactivate an employee account."""
 
-    require_admin(current_user)
+    require_roles(
+        current_user,
+        ADMIN_ROLES,
+        detail="Administrator access required.",
+    )
 
     user, membership = get_organization_employee(
         user_id=user_id,

@@ -1,15 +1,14 @@
 from typing import Annotated
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    HTTPException,
-    status,
-)
+from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.app.api.dependencies import get_current_user
+from backend.app.core.permissions import (
+    ANALYTICS_VIEW_ROLES,
+    require_roles,
+)
 from backend.app.database.session import get_db
 from backend.app.models.message import Message
 from backend.app.models.message_feedback import MessageFeedback
@@ -25,18 +24,6 @@ router = APIRouter(
     prefix="/api/v1/admin/analytics",
     tags=["admin analytics"],
 )
-
-
-def require_admin(
-    current_user: CurrentUserResponse,
-) -> None:
-    """Reject users who do not have the administrator role."""
-
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Administrator access required.",
-        )
 
 
 def percentage(
@@ -70,7 +57,11 @@ def get_feedback_analytics(
 ) -> FeedbackAnalyticsResponse:
     """Return organization-scoped feedback and answer statistics."""
 
-    require_admin(current_user)
+    require_roles(
+        current_user,
+        ANALYTICS_VIEW_ROLES,
+        detail="Analytics access required.",
+    )
 
     organization_id = current_user.organization_id
 
