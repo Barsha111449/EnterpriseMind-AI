@@ -17,6 +17,11 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from backend.app.api.dependencies import get_current_user
+from backend.app.core.permissions import (
+    DOCUMENT_UPLOAD_ROLES,
+    KNOWLEDGE_ACCESS_ROLES,
+    require_roles,
+)
 from backend.app.database.session import get_db
 from backend.app.models.document import Document
 from backend.app.models.document_chunk import DocumentChunk
@@ -105,6 +110,12 @@ async def upload_document(
     ],
 ) -> DocumentResponse:
     """Upload one PDF or DOCX document."""
+
+    require_roles(
+        current_user,
+        DOCUMENT_UPLOAD_ROLES,
+        detail="Document upload access required.",
+    )
 
     original_filename = Path(file.filename or "").name
 
@@ -196,6 +207,12 @@ def list_documents(
 ) -> list[DocumentResponse]:
     """List documents belonging to the current organisation."""
 
+    require_roles(
+        current_user,
+        KNOWLEDGE_ACCESS_ROLES,
+        detail="Document access required.",
+    )
+
     statement = (
         select(Document)
         .where(
@@ -230,6 +247,12 @@ def get_document(
 ) -> DocumentResponse:
     """Return one document belonging to the current organisation."""
 
+    require_roles(
+        current_user,
+        KNOWLEDGE_ACCESS_ROLES,
+        detail="Document access required.",
+    )
+
     statement = select(Document).where(
         Document.id == document_id,
         Document.organization_id
@@ -263,6 +286,12 @@ def download_document(
     ],
 ) -> FileResponse:
     """Download one document belonging to the current organisation."""
+
+    require_roles(
+        current_user,
+        KNOWLEDGE_ACCESS_ROLES,
+        detail="Document access required.",
+    )
 
     statement = select(Document).where(
         Document.id == document_id,
@@ -321,6 +350,12 @@ def process_document(
     ],
 ) -> DocumentProcessingResponse:
     """Extract text, create chunks, generate embeddings, and store them."""
+
+    require_roles(
+        current_user,
+        DOCUMENT_UPLOAD_ROLES,
+        detail="Document processing access required.",
+    )
 
     statement = select(Document).where(
         Document.id == document_id,
@@ -458,6 +493,12 @@ def list_document_chunks(
     ],
 ) -> list[DocumentChunkResponse]:
     """List stored chunks for one organisation document."""
+
+    require_roles(
+        current_user,
+        KNOWLEDGE_ACCESS_ROLES,
+        detail="Document access required.",
+    )
 
     document_statement = select(Document).where(
         Document.id == document_id,
