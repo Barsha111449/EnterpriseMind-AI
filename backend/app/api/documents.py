@@ -33,6 +33,7 @@ from backend.app.schemas.document import (
     DocumentProcessingResponse,
     DocumentResponse,
 )
+from backend.app.services.audit_service import record_audit_event
 from backend.app.services.document_processing import (
     extract_document_chunks,
 )
@@ -182,6 +183,26 @@ async def upload_document(
         destination.write_bytes(content)
 
         database_session.add(document)
+
+        record_audit_event(
+            database_session,
+            organization_id=current_user.organization_id,
+            actor_user_id=current_user.user_id,
+            action="document.uploaded",
+            resource_type="document",
+            resource_id=document.id,
+            description=(
+                f"Document '{document.original_filename}' "
+                "was uploaded."
+            ),
+            details={
+                "original_filename": document.original_filename,
+                "content_type": document.content_type,
+                "file_size_bytes": document.file_size_bytes,
+                "status": document.status,
+            },
+        )
+
         database_session.commit()
         database_session.refresh(document)
 
@@ -293,6 +314,25 @@ def delete_document(
             )
 
             file_path.replace(temporary_path)
+
+        record_audit_event(
+            database_session,
+            organization_id=current_user.organization_id,
+            actor_user_id=current_user.user_id,
+            action="document.deleted",
+            resource_type="document",
+            resource_id=document.id,
+            description=(
+                f"Document '{document.original_filename}' "
+                "was deleted."
+            ),
+            details={
+                "original_filename": document.original_filename,
+                "content_type": document.content_type,
+                "file_size_bytes": document.file_size_bytes,
+                "previous_status": document.status,
+            },
+        )
 
         database_session.delete(document)
         database_session.commit()
@@ -542,6 +582,24 @@ def process_document(
         document.status = "ready"
         document.error_message = None
 
+        record_audit_event(
+            database_session,
+            organization_id=current_user.organization_id,
+            actor_user_id=current_user.user_id,
+            action="document.processed",
+            resource_type="document",
+            resource_id=document.id,
+            description=(
+                f"Document '{document.original_filename}' "
+                "was processed successfully."
+            ),
+            details={
+                "original_filename": document.original_filename,
+                "chunk_count": len(extracted_chunks),
+                "status": document.status,
+            },
+        )
+
         database_session.commit()
 
         return DocumentProcessingResponse(
@@ -558,8 +616,30 @@ def process_document(
         )
 
         if failed_document is not None:
+            error_message = str(exc)[:2000]
+
             failed_document.status = "failed"
-            failed_document.error_message = str(exc)[:2000]
+            failed_document.error_message = error_message
+
+            record_audit_event(
+                database_session,
+                organization_id=current_user.organization_id,
+                actor_user_id=current_user.user_id,
+                action="document.processing_failed",
+                resource_type="document",
+                resource_id=failed_document.id,
+                description=(
+                    "Processing failed for document "
+                    f"'{failed_document.original_filename}'."
+                ),
+                details={
+                    "original_filename": (
+                        failed_document.original_filename
+                    ),
+                    "status": failed_document.status,
+                    "error": error_message,
+                },
+            )
 
             database_session.commit()
 
