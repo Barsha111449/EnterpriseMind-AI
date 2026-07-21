@@ -29,6 +29,7 @@ from backend.app.schemas.employees import (
     EmployeeRoleUpdateRequest,
     EmployeeStatusUpdateRequest,
 )
+from backend.app.services.audit_service import record_audit_event
 
 
 router = APIRouter(
@@ -201,6 +202,27 @@ def create_employee(
         )
 
         database_session.add(membership)
+        database_session.flush()
+
+        record_audit_event(
+            database_session,
+            organization_id=current_user.organization_id,
+            actor_user_id=current_user.user_id,
+            action="employee.created",
+            resource_type="employee",
+            resource_id=user.id,
+            description=(
+                f"Employee '{user.full_name}' was created."
+            ),
+            details={
+                "employee_email": user.email,
+                "employee_full_name": user.full_name,
+                "assigned_role": membership.role,
+                "membership_id": str(membership.id),
+                "is_active": user.is_active,
+            },
+        )
+
         database_session.commit()
 
         database_session.refresh(user)
@@ -267,15 +289,53 @@ def update_employee_role(
             detail="You cannot remove your own administrator role.",
         )
 
-    membership.role = request.role
+    previous_role = membership.role
 
-    database_session.commit()
-    database_session.refresh(membership)
+    if previous_role == request.role:
+        return build_employee_response(
+            user,
+            membership,
+        )
 
-    return build_employee_response(
-        user,
-        membership,
-    )
+    try:
+        membership.role = request.role
+
+        record_audit_event(
+            database_session,
+            organization_id=current_user.organization_id,
+            actor_user_id=current_user.user_id,
+            action="employee.role_changed",
+            resource_type="employee",
+            resource_id=user.id,
+            description=(
+                f"Role for employee '{user.full_name}' "
+                f"was changed from '{previous_role}' "
+                f"to '{request.role}'."
+            ),
+            details={
+                "employee_email": user.email,
+                "employee_full_name": user.full_name,
+                "previous_role": previous_role,
+                "new_role": request.role,
+                "membership_id": str(membership.id),
+            },
+        )
+
+        database_session.commit()
+        database_session.refresh(membership)
+
+        return build_employee_response(
+            user,
+            membership,
+        )
+
+    except SQLAlchemyError as exc:
+        database_session.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The employee role could not be updated.",
+        ) from exc
 
 
 @router.patch(
@@ -317,12 +377,62 @@ def update_employee_status(
             detail="You cannot deactivate your own account.",
         )
 
-    user.is_active = request.is_active
+    previous_status = user.is_active
 
-    database_session.commit()
-    database_session.refresh(user)
+    if previous_status == request.is_active:
+        return build_employee_response(
+            user,
+            membership,
+        )
 
-    return build_employee_response(
-        user,
-        membership,
-    )
+    try:
+        user.is_active = request.is_active
+
+        action = (
+            "employee.activated"
+            if request.is_active
+            else "employee.deactivated"
+        )
+
+        status_description = (
+            "activated"
+            if request.is_active
+            else "deactivated"
+        )
+
+        record_audit_event(
+            database_session,
+            organization_id=current_user.organization_id,
+            actor_user_id=current_user.user_id,
+            action=action,
+            resource_type="employee",
+            resource_id=user.id,
+            description=(
+                f"Employee '{user.full_name}' "
+                f"was {status_description}."
+            ),
+            details={
+                "employee_email": user.email,
+                "employee_full_name": user.full_name,
+                "role": membership.role,
+                "previous_is_active": previous_status,
+                "new_is_active": request.is_active,
+                "membership_id": str(membership.id),
+            },
+        )
+
+        database_session.commit()
+        database_session.refresh(user)
+
+        return build_employee_response(
+            user,
+            membership,
+        )
+
+    except SQLAlchemyError as exc:
+        database_session.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The employee status could not be updated.",
+        ) from exc
