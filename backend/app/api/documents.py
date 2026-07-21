@@ -9,6 +9,7 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Response,
     UploadFile,
     status,
 )
@@ -18,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.dependencies import get_current_user
 from backend.app.core.permissions import (
+    DOCUMENT_DELETE_ROLES,
     DOCUMENT_UPLOAD_ROLES,
     KNOWLEDGE_ACCESS_ROLES,
     require_roles,
@@ -230,6 +232,94 @@ def list_documents(
     ]
 
 
+@router.delete(
+    "/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_document(
+    document_id: uuid.UUID,
+    current_user: Annotated[
+        CurrentUserResponse,
+        Depends(get_current_user),
+    ],
+    database_session: Annotated[
+        Session,
+        Depends(get_db),
+    ],
+) -> Response:
+    """Delete an organization document and its stored file."""
+
+    require_roles(
+        current_user,
+        DOCUMENT_DELETE_ROLES,
+        detail="Document deletion access required.",
+    )
+
+    statement = select(Document).where(
+        Document.id == document_id,
+        Document.organization_id
+        == current_user.organization_id,
+    )
+
+    document = database_session.scalar(statement)
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    organization_directory = (
+        UPLOAD_ROOT / str(current_user.organization_id)
+    ).resolve()
+
+    file_path = Path(document.storage_path).resolve()
+
+    try:
+        file_path.relative_to(organization_directory)
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document file not found.",
+        ) from exc
+
+    temporary_path: Path | None = None
+
+    try:
+        if file_path.is_file():
+            temporary_path = file_path.with_name(
+                f".{file_path.name}.{uuid.uuid4().hex}.deleting"
+            )
+
+            file_path.replace(temporary_path)
+
+        database_session.delete(document)
+        database_session.commit()
+
+    except Exception as exc:
+        database_session.rollback()
+
+        if (
+            temporary_path is not None
+            and temporary_path.exists()
+            and not file_path.exists()
+        ):
+            temporary_path.replace(file_path)
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Document deletion could not be completed.",
+        ) from exc
+
+    if temporary_path is not None:
+        temporary_path.unlink(missing_ok=True)
+
+    return Response(
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+
+
 @router.get(
     "/{document_id}",
     response_model=DocumentResponse,
@@ -315,6 +405,7 @@ def download_document(
 
     try:
         file_path.relative_to(organization_directory)
+
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -379,6 +470,7 @@ def process_document(
 
     try:
         file_path.relative_to(organization_directory)
+
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
