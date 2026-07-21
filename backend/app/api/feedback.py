@@ -22,6 +22,7 @@ from backend.app.schemas.feedback import (
     FeedbackCreateRequest,
     FeedbackResponse,
 )
+from backend.app.services.audit_service import record_audit_event
 
 
 router = APIRouter(
@@ -142,11 +143,59 @@ def create_or_update_feedback(
         )
 
         database_session.add(feedback)
+        database_session.flush()
+
+        record_audit_event(
+            database_session,
+            organization_id=current_user.organization_id,
+            actor_user_id=current_user.user_id,
+            action="feedback.created",
+            resource_type="feedback",
+            resource_id=feedback.id,
+            description=(
+                "Feedback was submitted for an assistant message."
+            ),
+            details={
+                "message_id": str(message.id),
+                "conversation_id": str(message.conversation_id),
+                "rating": feedback.rating,
+                "comment": feedback.comment,
+            },
+        )
 
     else:
+        previous_rating = feedback.rating
+        previous_comment = feedback.comment
+
+        if (
+            previous_rating == request.rating
+            and previous_comment == comment
+        ):
+            return FeedbackResponse.model_validate(feedback)
+
         feedback.rating = request.rating
         feedback.comment = comment
         feedback.updated_at = datetime.now(timezone.utc)
+
+        record_audit_event(
+            database_session,
+            organization_id=current_user.organization_id,
+            actor_user_id=current_user.user_id,
+            action="feedback.updated",
+            resource_type="feedback",
+            resource_id=feedback.id,
+            description=(
+                "Feedback for an assistant message was updated."
+            ),
+            details={
+                "message_id": str(message.id),
+                "conversation_id": str(message.conversation_id),
+                "previous_rating": previous_rating,
+                "new_rating": feedback.rating,
+                "previous_comment": previous_comment,
+                "new_comment": feedback.comment,
+            },
+        )
 
     database_session.commit()
     database_session.refresh(feedback)
@@ -232,6 +281,24 @@ def delete_feedback(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Feedback not found.",
         )
+
+    record_audit_event(
+        database_session,
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.user_id,
+        action="feedback.deleted",
+        resource_type="feedback",
+        resource_id=feedback.id,
+        description=(
+            "Feedback for an assistant message was deleted."
+        ),
+        details={
+            "message_id": str(message.id),
+            "conversation_id": str(message.conversation_id),
+            "deleted_rating": feedback.rating,
+            "deleted_comment": feedback.comment,
+        },
+    )
 
     database_session.delete(feedback)
     database_session.commit()

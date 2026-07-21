@@ -25,6 +25,9 @@ from backend.app.schemas.conversation import (
     ConversationResponse,
     MessageResponse,
 )
+from backend.app.services.audit_service import (
+    record_audit_event,
+)
 
 
 router = APIRouter(
@@ -91,6 +94,26 @@ def create_conversation(
     )
 
     database_session.add(conversation)
+    database_session.flush()
+
+    record_audit_event(
+        database_session,
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.user_id,
+        action="conversation.created",
+        resource_type="conversation",
+        resource_id=conversation.id,
+        description=(
+            f"Conversation '{conversation.title}' was created."
+        ),
+        details={
+            "conversation_title": conversation.title,
+            "conversation_user_id": str(
+                conversation.user_id
+            ),
+        },
+    )
+
     database_session.commit()
     database_session.refresh(conversation)
 
@@ -236,6 +259,27 @@ def delete_conversation(
         conversation_id=conversation_id,
         current_user=current_user,
         database_session=database_session,
+    )
+
+    conversation_title = conversation.title
+    conversation_user_id = conversation.user_id
+
+    record_audit_event(
+        database_session,
+        organization_id=current_user.organization_id,
+        actor_user_id=current_user.user_id,
+        action="conversation.deleted",
+        resource_type="conversation",
+        resource_id=conversation.id,
+        description=(
+            f"Conversation '{conversation_title}' was deleted."
+        ),
+        details={
+            "conversation_title": conversation_title,
+            "conversation_user_id": str(
+                conversation_user_id
+            ),
+        },
     )
 
     database_session.delete(conversation)
