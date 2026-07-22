@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from time import perf_counter
 from typing import Annotated
 
 from fastapi import (
@@ -24,6 +25,9 @@ from backend.app.schemas.search import HybridSearchRequest
 from backend.app.services.answer_generation_service import (
     NO_EVIDENCE_ANSWER,
     generate_grounded_answer,
+)
+from backend.app.services.evaluation_service import (
+    record_rag_evaluation,
 )
 from backend.app.services.evidence_validation_service import (
     filter_relevant_candidates,
@@ -140,8 +144,7 @@ def ask_question(
     """
     Answer a question using validated organisation evidence.
 
-    When a conversation ID is supplied, the user question and
-    assistant answer are also saved in the messages table.
+    The response quality metrics are saved automatically.
     """
 
     question_text = request.question.strip()
@@ -151,6 +154,8 @@ def ask_question(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The question cannot be empty.",
         )
+
+    started_at = perf_counter()
 
     conversation = get_question_conversation(
         request=request,
@@ -181,6 +186,12 @@ def ask_question(
         candidates=relevant_candidates,
         top_k=request.top_k,
     )
+
+    evidence_texts = [
+        str(candidate.get("content", "")).strip()
+        for candidate in relevant_candidates
+        if str(candidate.get("content", "")).strip()
+    ]
 
     if not evidence.citations:
         response = AskQuestionResponse(
@@ -217,5 +228,27 @@ def ask_question(
             current_user=current_user,
             database_session=database_session,
         )
+
+    response_latency_ms = (
+        perf_counter() - started_at
+    ) * 1000
+
+    record_rag_evaluation(
+        database_session,
+        organization_id=current_user.organization_id,
+        user_id=current_user.user_id,
+        question=response.question,
+        answer=response.answer,
+        grounded=response.grounded,
+        citation_count=response.citation_count,
+        evidence_texts=evidence_texts,
+        response_latency_ms=response_latency_ms,
+        retrieved_candidate_count=len(
+            retrieved_candidates
+        ),
+        relevant_candidate_count=len(
+            relevant_candidates
+        ),
+    )
 
     return response
