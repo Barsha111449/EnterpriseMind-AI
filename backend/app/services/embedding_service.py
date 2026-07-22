@@ -9,7 +9,7 @@ EMBEDDING_DIMENSION = 384
 
 @lru_cache(maxsize=1)
 def get_embedding_model() -> SentenceTransformer:
-    """Load and reuse the embedding model."""
+    """Load and reuse one embedding model instance."""
 
     return SentenceTransformer(MODEL_NAME)
 
