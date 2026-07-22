@@ -25,4 +25,4 @@ Thumbs.db
 # Local uploaded and processed data
 data/processed/
 uploads/
-storage/
+storage/*.pyc
