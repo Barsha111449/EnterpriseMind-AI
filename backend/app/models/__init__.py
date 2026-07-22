@@ -8,6 +8,7 @@ from backend.app.models.organization import Organization
 from backend.app.models.organization_membership import (
     OrganizationMembership,
 )
+from backend.app.models.rag_evaluation import RagEvaluation
 from backend.app.models.user import User
 
 
@@ -21,4 +22,5 @@ __all__ = [
     "Message",
     "MessageFeedback",
     "AuditLog",
+    "RagEvaluation",
 ]
